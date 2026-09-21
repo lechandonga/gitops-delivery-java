@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "delivery.gitops/v1",
+  "name": "checkout-service",
+  "protectedEnv": false,
+  "requireApproval": false,
+  "stages": [
+    {
+      "id": "dev",
+      "env": "dev",
+      "desiredVersion": "v1.4.0",
+      "dependsOn": [],
+      "executionTimeoutMillis": 30000,
+      "maxAttempts": 3
+    },
+    {
+      "id": "staging-canary",
+      "env": "staging",
+      "desiredVersion": "v1.4.0",
+      "dependsOn": ["dev"],
+      "canary": {
+        "weights": [20, 60, 100],
+        "stepWaitMillis": 1000,
+        "healthThreshold": 0.95
+      },
+      "executionTimeoutMillis": 30000,
+      "maxAttempts": 2
+    },
+    {
+      "id": "prod",
+      "env": "prod",
+      "desiredVersion": "v1.4.0",
+      "dependsOn": ["staging-canary"],
+      "canary": {
+        "weights": [10, 50, 100],
+        "stepWaitMillis": 2000,
+        "healthThreshold": 0.99
+      },
+      "executionTimeoutMillis": 60000,
+      "maxAttempts": 2
+    }
+  ]
+}
