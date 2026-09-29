@@ -27,6 +27,10 @@ public class SimulatedInfrastructure {
     private final Map<String, Deployment> deployments = new ConcurrentHashMap<>();
     private final Set<String> executedStageKeys = ConcurrentHashMap.newKeySet();
     private final Map<String, AtomicInteger> stageCounters = new ConcurrentHashMap<>();
+    /** 某 (目标,版本) 真实发生过的灰度部署次数（每次放量计一次，按执行键幂等）。 */
+    private final Map<String, AtomicInteger> deployVersionCounters = new ConcurrentHashMap<>();
+    /** 某 (目标,版本) 真正成为稳定版本的推广次数（按执行键幂等）。 */
+    private final Map<String, AtomicInteger> promoteVersionCounters = new ConcurrentHashMap<>();
     private final Map<String, Double> healthScripts = new ConcurrentHashMap<>();
     private final Set<String> failBuildOnce = ConcurrentHashMap.newKeySet();
 
@@ -53,7 +57,9 @@ public class SimulatedInfrastructure {
 
     /** 部署（或调整灰度百分比）。返回当前灰度百分比。 */
     public int deployCanary(String target, String version, String flowId, int percent) {
-        executeOnce(target, flowId, "DEPLOY:" + percent);
+        boolean first = executeOnce(target, flowId, "DEPLOY:" + percent);
+        deployVersionCounters.computeIfAbsent(target + "@" + version, k -> new AtomicInteger())
+                .addAndGet(first ? 1 : 0);
         deployments.put(target, new Deployment(version, percent));
         return percent;
     }
@@ -68,7 +74,10 @@ public class SimulatedInfrastructure {
     }
 
     public void promoteStable(String target, String version, String flowId) {
-        if (!executeOnce(target, flowId, "PROMOTE")) {
+        boolean first = executeOnce(target, flowId, "PROMOTE");
+        promoteVersionCounters.computeIfAbsent(target + "@" + version, k -> new AtomicInteger())
+                .addAndGet(first ? 1 : 0);
+        if (!first) {
             return;
         }
         deployments.put(target, new Deployment(version, 100));
@@ -96,10 +105,22 @@ public class SimulatedInfrastructure {
         return stageCounters.getOrDefault(target + "|" + stage, new AtomicInteger()).get();
     }
 
+    /** 某目标某版本真实放量次数（用于断言暂停恢复不重放）。 */
+    public int deployCount(String target, String version) {
+        return deployVersionCounters.getOrDefault(target + "@" + version, new AtomicInteger()).get();
+    }
+
+    /** 某目标某版本真正推广为稳定版本的次数。 */
+    public int promoteCount(String target, String version) {
+        return promoteVersionCounters.getOrDefault(target + "@" + version, new AtomicInteger()).get();
+    }
+
     public synchronized void reset() {
         deployments.clear();
         executedStageKeys.clear();
         stageCounters.clear();
+        deployVersionCounters.clear();
+        promoteVersionCounters.clear();
         healthScripts.clear();
         failBuildOnce.clear();
     }

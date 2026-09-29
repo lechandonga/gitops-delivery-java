@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.lechandonga.gitopsdeliveryjava.exception.DeliveryRejectedException;
 import com.github.lechandonga.gitopsdeliveryjava.model.CanarySpec;
 import com.github.lechandonga.gitopsdeliveryjava.model.DesiredTarget;
+import com.github.lechandonga.gitopsdeliveryjava.model.FreezeWindow;
 import com.github.lechandonga.gitopsdeliveryjava.model.Manifest;
 import com.github.lechandonga.gitopsdeliveryjava.model.ReasonCode;
 import org.springframework.stereotype.Component;
@@ -127,6 +128,39 @@ public class ManifestSerde {
                 throw new DeliveryRejectedException(ReasonCode.UNSUPPORTED_OPTION,
                         "target=" + name + " minHealthyRatio 必须在 (0,1]");
             }
+        }
+        validateFreezeWindow(name, t.getFreezeWindow());
+    }
+
+    private void validateFreezeWindow(String name, FreezeWindow w) {
+        if (w == null) {
+            return; // 旧清单/未声明：默认不冻结
+        }
+        if (w.getStart() == null || w.getEnd() == null) {
+            throw new DeliveryRejectedException(ReasonCode.MANIFEST_INVALID,
+                    "target=" + name + " freezeWindow 必须同时声明 start 与 end（HH:mm）");
+        }
+        java.time.LocalTime start;
+        java.time.LocalTime end;
+        try {
+            start = java.time.LocalTime.parse(w.getStart(),
+                    java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new DeliveryRejectedException(ReasonCode.MANIFEST_INVALID,
+                    "target=" + name + " freezeWindow.start 不是合法 HH:mm: " + w.getStart());
+        }
+        try {
+            end = java.time.LocalTime.parse(w.getEnd(),
+                    java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new DeliveryRejectedException(ReasonCode.MANIFEST_INVALID,
+                    "target=" + name + " freezeWindow.end 不是合法 HH:mm: " + w.getEnd());
+        }
+        if (start.equals(end)) {
+            // start==end 语义歧义（全天？空集？），明确拒绝，禁止静默降级
+            throw new DeliveryRejectedException(ReasonCode.UNSUPPORTED_OPTION,
+                    "target=" + name + " freezeWindow start 与 end 不得相同: "
+                            + w.getStart() + "-" + w.getEnd());
         }
     }
 }

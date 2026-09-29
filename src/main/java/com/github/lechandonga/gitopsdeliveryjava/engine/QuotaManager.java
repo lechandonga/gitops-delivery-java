@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.function.Consumer;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -26,9 +27,15 @@ public class QuotaManager {
     private final DeliveryProperties props;
     private final Set<String> active = new HashSet<>();
     private final Deque<String> waiting = new ArrayDeque<>();
+    /** 槽位释放并 FIFO 提升等待者后的回调（由编排层续跑被提升的暂停目标）。 */
+    private volatile Consumer<String> promotionSink = promoted -> { };
 
     public QuotaManager(DeliveryProperties props) {
         this.props = props;
+    }
+
+    public void setPromotionSink(Consumer<String> sink) {
+        this.promotionSink = sink == null ? promoted -> { } : sink;
     }
 
     public synchronized Admission tryAcquire(String target) {
@@ -49,8 +56,19 @@ public class QuotaManager {
         return Admission.REJECTED;
     }
 
-    /** 释放槽位并返回被提升（从队列进入执行）的目标，无则 null。 */
+    /**
+     * 释放槽位：FIFO 提升一个等待目标占用槽位，并通过 promotionSink 通知编排层续跑。
+     * 回调在锁外执行，避免与续跑路径的 tryAcquire 形成锁嵌套。
+     */
     public synchronized String release(String target) {
+        String promoted = releaseInternal(target);
+        if (promoted != null) {
+            promotionSink.accept(promoted);
+        }
+        return promoted;
+    }
+
+    private synchronized String releaseInternal(String target) {
         active.remove(target);
         waiting.remove(target);
         if (active.size() < props.getMaxConcurrency() && !waiting.isEmpty()) {
@@ -64,6 +82,19 @@ public class QuotaManager {
     /** 仅取消排队，不释放槽位。 */
     public synchronized void dequeue(String target) {
         waiting.remove(target);
+    }
+
+    /**
+     * 已被提升到槽位但暂时无法续跑（如恢复时撞上冻结窗口）：把槽位退回队列头部。
+     * 真正在推进的目标数因此永远不超过 maxConcurrency，且不会直接失败。
+     */
+    public synchronized void requeue(String target) {
+        active.remove(target);
+        // 刚从队头被提升的目标拥有“返回队列头部”的优先权：
+        // 即便队列此刻已满也保留它（不丢、不空占槽），随后再由 FIFO 释放逻辑提升其余等待者。
+        if (!waiting.contains(target)) {
+            waiting.addFirst(target);
+        }
     }
 
     public synchronized boolean isQueued(String target) {

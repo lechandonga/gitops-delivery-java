@@ -7,9 +7,13 @@ import com.github.lechandonga.gitopsdeliveryjava.engine.QuotaManager;
 import com.github.lechandonga.gitopsdeliveryjava.engine.StageExecutor;
 import com.github.lechandonga.gitopsdeliveryjava.lease.LeaseManager;
 import com.github.lechandonga.gitopsdeliveryjava.service.DeliveryService;
+import com.github.lechandonga.gitopsdeliveryjava.service.FreezeEvaluator;
+import com.github.lechandonga.gitopsdeliveryjava.service.PauseControl;
 import com.github.lechandonga.gitopsdeliveryjava.service.PolicyGate;
 import com.github.lechandonga.gitopsdeliveryjava.service.RecoveryService;
 import com.github.lechandonga.gitopsdeliveryjava.service.SimulatedInfrastructure;
+import com.github.lechandonga.gitopsdeliveryjava.service.TimeSource;
+import com.github.lechandonga.gitopsdeliveryjava.engine.VersionHistory;
 import com.github.lechandonga.gitopsdeliveryjava.store.StateStore;
 
 import java.nio.file.Path;
@@ -26,6 +30,8 @@ class DeliverySystemHarness {
     final SimulatedInfrastructure infra;
     final DeliveryService service;
     final RecoveryService recovery;
+    final TimeSource timeSource;
+    final PauseControl pauseControl;
 
     DeliverySystemHarness(Path dir) {
         this(dir, 2, 10);
@@ -46,9 +52,14 @@ class DeliverySystemHarness {
         DependencyResolver resolver = new DependencyResolver();
         DriftDetector drift = new DriftDetector();
         PolicyGate gate = new PolicyGate();
-        StageExecutor stageExecutor = new StageExecutor(infra, store, leases, props);
+        timeSource = new TimeSource();
+        pauseControl = new PauseControl();
+        FreezeEvaluator freezeEvaluator = new FreezeEvaluator(timeSource);
+        VersionHistory versionHistory = new VersionHistory(store);
+        StageExecutor stageExecutor = new StageExecutor(infra, store, leases, props, pauseControl);
         service = new DeliveryService(store, leases, quota, resolver, drift,
-                stageExecutor, gate, infra, props);
+                stageExecutor, gate, infra, props, freezeEvaluator, pauseControl, versionHistory);
         recovery = new RecoveryService(store, leases, props, drift, service);
+        service.wireQuotaPromotionForTest();
     }
 }

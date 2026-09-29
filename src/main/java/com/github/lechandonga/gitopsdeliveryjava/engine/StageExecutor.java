@@ -6,10 +6,12 @@ import com.github.lechandonga.gitopsdeliveryjava.model.ActualTargetState;
 import com.github.lechandonga.gitopsdeliveryjava.model.DesiredTarget;
 import com.github.lechandonga.gitopsdeliveryjava.model.EventRecord;
 import com.github.lechandonga.gitopsdeliveryjava.model.FlowRecord;
+import com.github.lechandonga.gitopsdeliveryjava.model.FlowStatus;
 import com.github.lechandonga.gitopsdeliveryjava.model.ReasonCode;
 import com.github.lechandonga.gitopsdeliveryjava.model.Stage;
 import com.github.lechandonga.gitopsdeliveryjava.model.TargetPhase;
 import com.github.lechandonga.gitopsdeliveryjava.service.SimulatedInfrastructure;
+import com.github.lechandonga.gitopsdeliveryjava.service.PauseControl;
 import com.github.lechandonga.gitopsdeliveryjava.store.StateStore;
 import org.springframework.stereotype.Component;
 
@@ -34,19 +36,25 @@ public class StageExecutor {
         public static StageResult fail(ReasonCode code, String detail) {
             return new StageResult(false, code, detail);
         }
+
+        public static StageResult paused(String detail) {
+            return new StageResult(false, ReasonCode.FLOW_PAUSED, detail);
+        }
     }
 
     private final SimulatedInfrastructure infra;
     private final StateStore store;
     private final LeaseManager leases;
     private final DeliveryProperties props;
+    private final PauseControl pauseControl;
 
     public StageExecutor(SimulatedInfrastructure infra, StateStore store,
-                         LeaseManager leases, DeliveryProperties props) {
+                         LeaseManager leases, DeliveryProperties props, PauseControl pauseControl) {
         this.infra = infra;
         this.store = store;
         this.leases = leases;
         this.props = props;
+        this.pauseControl = pauseControl;
     }
 
     public boolean executeStage(DesiredTarget desired, ActualTargetState actual, FlowRecord flow, Stage stage) {
@@ -85,6 +93,10 @@ public class StageExecutor {
                             result.reason(), result.detail(), actual);
                     return result;
                 }
+                if (result.reason() == ReasonCode.FLOW_PAUSED) {
+                    // 暂停不是失败：不重试、不回滚，流程停在已持久化的放量进度上
+                    return result;
+                }
                 lastError = new RuntimeException(result.detail());
             } catch (RuntimeException ex) {
                 lastError = ex;
@@ -119,13 +131,14 @@ public class StageExecutor {
                 return StageResult.ok();
             }
             case DEPLOY_CANARY -> {
-                if (!desired.getCanary().isEnabled()) {
-                    // 无灰度策略：全量部署为灰度相位，下一步直接推广
-                    infra.deployCanary(target, version, flow.getFlowId(), 100);
-                    applyCanaryState(actual, version, 100);
-                    return StageResult.ok();
-                }
-                for (int percent : desired.getCanary().getSteps()) {
+                // 续跑语义：已成功完成的放量步骤一律跳过（按持久化下标，不按版本/百分比猜测），
+                // 因此暂停恢复不会重放已放的量，也不会多发一次版本。
+                boolean canaryEnabled = desired.getCanary().isEnabled();
+                java.util.List<Integer> steps = canaryEnabled
+                        ? desired.getCanary().getSteps()
+                        : java.util.List.of(100);
+                for (int i = flow.getCanaryStepIndex() + 1; i < steps.size(); i++) {
+                    int percent = steps.get(i);
                     if (!leases.isHolder(target, flow.getLeaseHolder(), flow.getFencingToken())) {
                         return StageResult.fail(ReasonCode.LEASE_EXPIRED, "灰度放量中途租约失效");
                     }
@@ -140,6 +153,21 @@ public class StageExecutor {
                         return StageResult.fail(ReasonCode.HEALTH_CHECK_FAILED,
                                 "灰度=" + percent + "% 健康率=" + ratio
                                         + " 低于阈值=" + desired.getCanary().getMinHealthyRatio());
+                    }
+                    if (!canaryEnabled) {
+                        // 无灰度直推：不使用灰度下标语义（canaryStepIndex 保持 -1）
+                        return StageResult.ok();
+                    }
+                    // 只有“放量成功 + 健康达标”之后才推进下标并持久化：
+                    // 失败/没做完的步骤绝不被当作已完成，重试/恢复时必须重做。
+                    flow.setCanaryStepIndex(i);
+                    store.saveFlow(flow);
+                    // 放量边界检查人工暂停（最后一步 100% 完成后不再暂停，直接进入推广）
+                    if (i < steps.size() - 1 && pauseControl.pauseRequested(target)) {
+                        record(flow, desired, stage, actual.getPhase().name(),
+                                FlowStatus.PAUSED.name(), ReasonCode.FLOW_PAUSED,
+                                "灰度放量到 " + percent + "% 后在边界暂停，已完成下标=" + i, actual);
+                        return StageResult.paused("paused at canary " + percent + "%");
                     }
                 }
                 return StageResult.ok();

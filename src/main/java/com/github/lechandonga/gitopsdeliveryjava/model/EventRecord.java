@@ -17,6 +17,10 @@ public class EventRecord {
     private ReasonCode reason;
     private String detail;
     private String inputVersion;
+    /** 版本变更前稳定版本（指定版本回退审计用，旧事件缺字段宽容读取）。 */
+    private String fromVersion;
+    /** 版本变更后稳定版本（指定版本回退审计用，旧事件缺字段宽容读取）。 */
+    private String toVersion;
     private long fencingToken;
 
     public EventRecord() {
@@ -44,6 +48,10 @@ public class EventRecord {
     public void setDetail(String detail) { this.detail = detail; }
     public String getInputVersion() { return inputVersion; }
     public void setInputVersion(String inputVersion) { this.inputVersion = inputVersion; }
+    public String getFromVersion() { return fromVersion; }
+    public void setFromVersion(String fromVersion) { this.fromVersion = fromVersion; }
+    public String getToVersion() { return toVersion; }
+    public void setToVersion(String toVersion) { this.toVersion = toVersion; }
     public long getFencingToken() { return fencingToken; }
     public void setFencingToken(long fencingToken) { this.fencingToken = fencingToken; }
 }

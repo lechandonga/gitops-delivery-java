@@ -15,6 +15,17 @@ public class FlowRecord {
     private FlowStatus status = FlowStatus.PENDING;
     private Stage currentStage;
     private List<Stage> completedStages = new ArrayList<>();
+    /** DEPLOY_CANARY 已成功放量到的步骤下标（-1 表示一步都还没完成），恢复/续跑据此跳过，绝不重放。 */
+    private int canaryStepIndex = -1;
+    /** 流程类型：普通发布 PUBLISH（旧快照缺省）/ 指定版本回退 ROLLBACK。 */
+    private String kind = "PUBLISH";
+    /** ROLLBACK 流程的目标版本；审计“从哪个版本退到哪个版本”。 */
+    private String rollbackToVersion;
+    /**
+     * PAUSED 流程是否已收到显式恢复请求（进入额度排队）。
+     * false=刚暂停，即使槽位空着也不得被自动提升续跑；必须等待显式 resume。
+     */
+    private boolean resumeRequested = false;
     private ReasonCode terminalReason = ReasonCode.NONE;
     private String stableVersionBefore;
     private long createdAt;
@@ -38,6 +49,14 @@ public class FlowRecord {
     public void setCurrentStage(Stage currentStage) { this.currentStage = currentStage; }
     public List<Stage> getCompletedStages() { return completedStages; }
     public void setCompletedStages(List<Stage> completedStages) { this.completedStages = completedStages; }
+    public int getCanaryStepIndex() { return canaryStepIndex; }
+    public void setCanaryStepIndex(int canaryStepIndex) { this.canaryStepIndex = canaryStepIndex; }
+    public String getKind() { return kind; }
+    public void setKind(String kind) { this.kind = kind; }
+    public String getRollbackToVersion() { return rollbackToVersion; }
+    public void setRollbackToVersion(String rollbackToVersion) { this.rollbackToVersion = rollbackToVersion; }
+    public boolean isResumeRequested() { return resumeRequested; }
+    public void setResumeRequested(boolean resumeRequested) { this.resumeRequested = resumeRequested; }
     public ReasonCode getTerminalReason() { return terminalReason; }
     public void setTerminalReason(ReasonCode terminalReason) { this.terminalReason = terminalReason; }
     public String getStableVersionBefore() { return stableVersionBefore; }

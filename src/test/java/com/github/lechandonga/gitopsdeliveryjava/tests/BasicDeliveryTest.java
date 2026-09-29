@@ -5,6 +5,7 @@ import com.github.lechandonga.gitopsdeliveryjava.engine.DependencyResolver;
 import com.github.lechandonga.gitopsdeliveryjava.engine.DriftDetector;
 import com.github.lechandonga.gitopsdeliveryjava.engine.QuotaManager;
 import com.github.lechandonga.gitopsdeliveryjava.engine.StageExecutor;
+import com.github.lechandonga.gitopsdeliveryjava.engine.VersionHistory;
 import com.github.lechandonga.gitopsdeliveryjava.lease.LeaseManager;
 import com.github.lechandonga.gitopsdeliveryjava.model.FlowStatus;
 import com.github.lechandonga.gitopsdeliveryjava.model.Manifest;
@@ -42,9 +43,15 @@ class BasicDeliveryTest {
         DependencyResolver resolver = new DependencyResolver();
         DriftDetector drift = new DriftDetector();
         PolicyGate gate = new PolicyGate();
-        StageExecutor stageExecutor = new StageExecutor(infra, store, leases, props);
+        com.github.lechandonga.gitopsdeliveryjava.service.TimeSource timeSource =
+                new com.github.lechandonga.gitopsdeliveryjava.service.TimeSource();
+        com.github.lechandonga.gitopsdeliveryjava.service.PauseControl pauseControl =
+                new com.github.lechandonga.gitopsdeliveryjava.service.PauseControl();
+        StageExecutor stageExecutor = new StageExecutor(infra, store, leases, props, pauseControl);
         DeliveryService svc = new DeliveryService(store, leases, quota, resolver, drift,
-                stageExecutor, gate, infra, props);
+                stageExecutor, gate, infra, props,
+                new com.github.lechandonga.gitopsdeliveryjava.service.FreezeEvaluator(timeSource),
+                pauseControl, new VersionHistory(store));
         return svc;
     }
 

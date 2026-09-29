@@ -72,6 +72,32 @@ public class DeliveryController {
         return deliveryService.rollback(name, actor);
     }
 
+    /** 回退到指定的历史稳定版本（冻结窗口内也允许；版本必须曾在该目标稳定发布）。 */
+    @PostMapping("/targets/{name}/rollback-to")
+    public ReconcileOutcome rollbackToVersion(
+            @PathVariable("name") String name,
+            @RequestParam("version") String version,
+            @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
+        return deliveryService.rollbackToVersion(name, version, actor);
+    }
+
+    /** 灰度人工暂停：停在当前放量步骤，立即释放并发槽。 */
+    @PostMapping("/targets/{name}/pause")
+    public ReconcileOutcome pause(@PathVariable("name") String name,
+                                  @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
+        return deliveryService.pause(name, actor);
+    }
+
+    /** 灰度恢复：从暂停步骤续跑；额度满时排队，不重放已放的量。 */
+    @PostMapping("/targets/{name}/resume")
+    public ReconcileOutcome resume(
+            @PathVariable("name") String name,
+            @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor,
+            @RequestHeader(value = "X-Actor-Roles", defaultValue = "") String rolesHeader,
+            @RequestParam(value = "approved", defaultValue = "false") boolean approved) {
+        return deliveryService.resume(name, actor, parseRoles(rolesHeader), approved);
+    }
+
     @PostMapping("/targets/{name}/cancel")
     public ReconcileOutcome cancel(@PathVariable("name") String name,
                                    @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {

@@ -60,6 +60,14 @@ public class RecoveryService {
         leases.seedHighWaterMark(Math.max(maxToken, store.readFencingHighWaterMark()));
         int recovered = 0;
         for (FlowRecord flow : unfinished) {
+            if (flow.getStatus() == FlowStatus.PAUSED) {
+                // 人工暂停是持久化的显式状态：重启后仍为 PAUSED，不接管、不清理半发布、
+                // 恢复入口（resume）照常可用；暂停期间本就不持有租约与并发槽。
+                record(flow.getTarget(), flow, ReasonCode.FLOW_PAUSED,
+                        "重启恢复：流程重启前处于人工暂停，保持 PAUSED（放量下标="
+                                + flow.getCanaryStepIndex() + "），等待显式恢复");
+                continue;
+            }
             recoverFlow(flow);
             recovered++;
         }
