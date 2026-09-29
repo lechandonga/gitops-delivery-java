@@ -14,6 +14,7 @@ public class DesiredTarget {
     private List<String> dependsOn = new ArrayList<>();
     private CanarySpec canary = new CanarySpec();
     private ProtectionPolicy protection = new ProtectionPolicy();
+    private List<FreezeWindow> freezeWindows = new ArrayList<>();
     private int timeoutSeconds = 60;
     private int maxAttempts = 3;
 
@@ -29,6 +30,8 @@ public class DesiredTarget {
     public void setCanary(CanarySpec canary) { this.canary = canary; }
     public ProtectionPolicy getProtection() { return protection; }
     public void setProtection(ProtectionPolicy protection) { this.protection = protection; }
+    public List<FreezeWindow> getFreezeWindows() { return freezeWindows; }
+    public void setFreezeWindows(List<FreezeWindow> freezeWindows) { this.freezeWindows = freezeWindows; }
     public int getTimeoutSeconds() { return timeoutSeconds; }
     public void setTimeoutSeconds(int timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
     public int getMaxAttempts() { return maxAttempts; }

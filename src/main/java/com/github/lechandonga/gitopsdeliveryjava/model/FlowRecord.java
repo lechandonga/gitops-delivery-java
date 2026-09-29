@@ -23,6 +23,9 @@ public class FlowRecord {
     private int attempts;
     private long fencingToken;
     private String leaseHolder;
+    private boolean pauseRequested;
+    private int canaryStepIndex;
+    private boolean resumeRequested;
 
     public String getFlowId() { return flowId; }
     public void setFlowId(String flowId) { this.flowId = flowId; }
@@ -54,4 +57,10 @@ public class FlowRecord {
     public void setFencingToken(long fencingToken) { this.fencingToken = fencingToken; }
     public String getLeaseHolder() { return leaseHolder; }
     public void setLeaseHolder(String leaseHolder) { this.leaseHolder = leaseHolder; }
+    public boolean isPauseRequested() { return pauseRequested; }
+    public void setPauseRequested(boolean pauseRequested) { this.pauseRequested = pauseRequested; }
+    public int getCanaryStepIndex() { return canaryStepIndex; }
+    public void setCanaryStepIndex(int canaryStepIndex) { this.canaryStepIndex = canaryStepIndex; }
+    public boolean isResumeRequested() { return resumeRequested; }
+    public void setResumeRequested(boolean resumeRequested) { this.resumeRequested = resumeRequested; }
 }

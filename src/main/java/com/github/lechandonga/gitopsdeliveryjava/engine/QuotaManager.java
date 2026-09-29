@@ -49,14 +49,16 @@ public class QuotaManager {
         return Admission.REJECTED;
     }
 
-    /** 释放槽位并返回被提升（从队列进入执行）的目标，无则 null。 */
+    /**
+     * 释放槽位并返回队首等待目标（FIFO）。注意：被提升目标【不会自动占槽】——
+     * 它只是获得“下一个获槽资格”，由真正的驱动入口（resume/reconcile）再次 tryAcquire
+     * 完成占槽。这样可避免“排队恢复的暂停流程在无人驱动时长期占着槽位”。
+     */
     public synchronized String release(String target) {
         active.remove(target);
         waiting.remove(target);
         if (active.size() < props.getMaxConcurrency() && !waiting.isEmpty()) {
-            String promoted = waiting.poll();
-            active.add(promoted);
-            return promoted;
+            return waiting.peek();
         }
         return null;
     }
@@ -68,6 +70,22 @@ public class QuotaManager {
 
     public synchronized boolean isQueued(String target) {
         return waiting.contains(target);
+    }
+
+    /**
+     * 排队目标在槽位有空时“出队占槽”（FIFO 队首优先）。
+     * 仅当目标确实在等待队列中且有空槽时成功，返回 true；否则不变动状态。
+     */
+    public synchronized boolean admitQueued(String target) {
+        if (!waiting.contains(target)) {
+            return false;
+        }
+        if (active.size() >= props.getMaxConcurrency()) {
+            return false;
+        }
+        waiting.remove(target);
+        active.add(target);
+        return true;
     }
 
     public synchronized int activeCount() {

@@ -8,6 +8,7 @@ public enum FlowStatus {
     RUNNING,
     WAITING_DEPS,
     WAITING_QUOTA,
+    PAUSED,
     SUCCEEDED,
     FAILED,
     ROLLED_BACK,

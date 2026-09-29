@@ -6,6 +6,7 @@ import com.github.lechandonga.gitopsdeliveryjava.model.ActualTargetState;
 import com.github.lechandonga.gitopsdeliveryjava.model.DesiredTarget;
 import com.github.lechandonga.gitopsdeliveryjava.model.EventRecord;
 import com.github.lechandonga.gitopsdeliveryjava.model.FlowRecord;
+import com.github.lechandonga.gitopsdeliveryjava.model.FlowStatus;
 import com.github.lechandonga.gitopsdeliveryjava.model.ReasonCode;
 import com.github.lechandonga.gitopsdeliveryjava.model.Stage;
 import com.github.lechandonga.gitopsdeliveryjava.model.TargetPhase;
@@ -34,6 +35,10 @@ public class StageExecutor {
         public static StageResult fail(ReasonCode code, String detail) {
             return new StageResult(false, code, detail);
         }
+
+        public boolean paused() {
+            return reason == ReasonCode.FLOW_PAUSED;
+        }
     }
 
     private final SimulatedInfrastructure infra;
@@ -56,11 +61,23 @@ public class StageExecutor {
     public StageResult run(DesiredTarget desired, ActualTargetState actual, FlowRecord flow, Stage stage) {
         int maxAttempts = Math.max(1, desired.getMaxAttempts());
         RuntimeException lastError = null;
+        // 暂停期间不计入流程 deadline：恢复后续跑必须拥有完整的超时预算
+        long deadline = flow.getDeadlineAt();
+        if (stage == Stage.DEPLOY_CANARY && flow.getCanaryStepIndex() > 0
+                && flow.getStatus() == FlowStatus.RUNNING) {
+            deadline = System.currentTimeMillis() + desired.getTimeoutSeconds() * 1000L;
+            flow.setDeadlineAt(deadline);
+        }
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             flow.setAttempts(attempt);
+            // 人工暂停优先于一切：不重试、不判失败，停在当前进度
+            if (flow.isPauseRequested() || infra.isPauseRequested(flow.getFlowId())) {
+                return StageResult.fail(ReasonCode.FLOW_PAUSED,
+                        "阶段=" + stage + " 执行前流程已被要求暂停");
+            }
             // 超时判定：被中断/超时的流程不得判定为成功
-            if (System.currentTimeMillis() >= flow.getDeadlineAt()) {
+            if (System.currentTimeMillis() >= deadline) {
                 record(flow, desired, stage, actual.getPhase().name(), actual.getPhase().name(),
                         ReasonCode.STAGE_TIMEOUT, "阶段=" + stage + " 超过流程截止时间", actual);
                 return StageResult.fail(ReasonCode.STAGE_TIMEOUT, "stage=" + stage);
@@ -83,6 +100,10 @@ public class StageExecutor {
                 if (result.reason() == ReasonCode.HEALTH_CHECK_FAILED) {
                     record(flow, desired, stage, actual.getPhase().name(), actual.getPhase().name(),
                             result.reason(), result.detail(), actual);
+                    return result;
+                }
+                // 人工暂停是结论性停机，不是失败：绝不重试、绝不再放下一个百分比
+                if (result.paused()) {
                     return result;
                 }
                 lastError = new RuntimeException(result.detail());
@@ -125,11 +146,22 @@ public class StageExecutor {
                     applyCanaryState(actual, version, 100);
                     return StageResult.ok();
                 }
-                for (int percent : desired.getCanary().getSteps()) {
+                java.util.List<Integer> steps = desired.getCanary().getSteps();
+                for (int i = 0; i < steps.size(); i++) {
+                    int percent = steps.get(i);
+                    // 续跑：暂停前已放过的百分比绝不重放（i < canaryStepIndex 的步已完成）
+                    if (i < flow.getCanaryStepIndex()) {
+                        continue;
+                    }
+                    if (flow.isPauseRequested() || infra.isPauseRequested(flow.getFlowId())) {
+                        return StageResult.fail(ReasonCode.FLOW_PAUSED,
+                                "灰度=" + percent + "% 步前收到暂停，停在已完成 "
+                                        + flow.getCanaryStepIndex() + " 步");
+                    }
                     if (!leases.isHolder(target, flow.getLeaseHolder(), flow.getFencingToken())) {
                         return StageResult.fail(ReasonCode.LEASE_EXPIRED, "灰度放量中途租约失效");
                     }
-                    if (System.currentTimeMillis() >= flow.getDeadlineAt()) {
+                if (System.currentTimeMillis() >= flow.getDeadlineAt()) {
                         return StageResult.fail(ReasonCode.STAGE_TIMEOUT, "灰度放量超时");
                     }
                     infra.deployCanary(target, version, flow.getFlowId(), percent);
@@ -140,6 +172,15 @@ public class StageExecutor {
                         return StageResult.fail(ReasonCode.HEALTH_CHECK_FAILED,
                                 "灰度=" + percent + "% 健康率=" + ratio
                                         + " 低于阈值=" + desired.getCanary().getMinHealthyRatio());
+                    }
+                    // 记录本步已完成（崩溃/接管后据此跳过，绝不重放）
+                    flow.setCanaryStepIndex(i + 1);
+                    store.saveFlow(flow);
+                    // 步后栅栏：确定性注入“刚放过 percent% 立刻人工暂停”的场景
+                    infra.fireCanaryBarrier(target, percent);
+                    if (flow.isPauseRequested() || infra.isPauseRequested(flow.getFlowId())) {
+                        return StageResult.fail(ReasonCode.FLOW_PAUSED,
+                                "灰度=" + percent + "% 完成后收到暂停，停在当前进度");
                     }
                 }
                 return StageResult.ok();

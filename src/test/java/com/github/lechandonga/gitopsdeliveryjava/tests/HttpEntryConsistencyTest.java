@@ -23,7 +23,8 @@ class HttpEntryConsistencyTest {
     @Test
     void httpEntryAndServiceEntryAgree(@TempDir Path dir) {
         DeliverySystemHarness h = new DeliverySystemHarness(dir);
-        DeliveryController api = new DeliveryController(h.service, new ManifestSerde(), h.store);
+        DeliveryController api = new DeliveryController(h.service, new ManifestSerde(), h.store,
+                h.versionHistory);
         String protectedJson = """
                 {"apiVersion":"gitops.local/v1","kind":"DeliveryManifest",
                  "targets":{"sec":{"desiredVersion":"v1",
@@ -50,7 +51,8 @@ class HttpEntryConsistencyTest {
     @Test
     void unknownFieldViaApiRejected(@TempDir Path dir) {
         DeliverySystemHarness h = new DeliverySystemHarness(dir);
-        DeliveryController api = new DeliveryController(h.service, new ManifestSerde(), h.store);
+        DeliveryController api = new DeliveryController(h.service, new ManifestSerde(), h.store,
+                h.versionHistory);
         DeliveryRejectedException ex = assertThrows(DeliveryRejectedException.class,
                 () -> api.applyManifest("""
                         {"apiVersion":"gitops.local/v1","kind":"DeliveryManifest",

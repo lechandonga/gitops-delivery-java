@@ -17,6 +17,8 @@ public class EventRecord {
     private ReasonCode reason;
     private String detail;
     private String inputVersion;
+    /** 版本变更类事件的“变更后/回退目标”版本，用于追溯从哪个版本退到哪个版本。 */
+    private String targetVersion;
     private long fencingToken;
 
     public EventRecord() {
@@ -44,6 +46,8 @@ public class EventRecord {
     public void setDetail(String detail) { this.detail = detail; }
     public String getInputVersion() { return inputVersion; }
     public void setInputVersion(String inputVersion) { this.inputVersion = inputVersion; }
+    public String getTargetVersion() { return targetVersion; }
+    public void setTargetVersion(String targetVersion) { this.targetVersion = targetVersion; }
     public long getFencingToken() { return fencingToken; }
     public void setFencingToken(long fencingToken) { this.fencingToken = fencingToken; }
 }

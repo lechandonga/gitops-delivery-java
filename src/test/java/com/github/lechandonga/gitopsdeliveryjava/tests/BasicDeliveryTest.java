@@ -5,6 +5,8 @@ import com.github.lechandonga.gitopsdeliveryjava.engine.DependencyResolver;
 import com.github.lechandonga.gitopsdeliveryjava.engine.DriftDetector;
 import com.github.lechandonga.gitopsdeliveryjava.engine.QuotaManager;
 import com.github.lechandonga.gitopsdeliveryjava.engine.StageExecutor;
+import com.github.lechandonga.gitopsdeliveryjava.engine.TimeSource;
+import com.github.lechandonga.gitopsdeliveryjava.engine.VersionHistory;
 import com.github.lechandonga.gitopsdeliveryjava.lease.LeaseManager;
 import com.github.lechandonga.gitopsdeliveryjava.model.FlowStatus;
 import com.github.lechandonga.gitopsdeliveryjava.model.Manifest;
@@ -12,6 +14,7 @@ import com.github.lechandonga.gitopsdeliveryjava.model.ReasonCode;
 import com.github.lechandonga.gitopsdeliveryjava.model.ReconcileOutcome;
 import com.github.lechandonga.gitopsdeliveryjava.model.TargetPhase;
 import com.github.lechandonga.gitopsdeliveryjava.service.DeliveryService;
+import com.github.lechandonga.gitopsdeliveryjava.service.FreezeGate;
 import com.github.lechandonga.gitopsdeliveryjava.service.PolicyGate;
 import com.github.lechandonga.gitopsdeliveryjava.service.RecoveryService;
 import com.github.lechandonga.gitopsdeliveryjava.service.SimulatedInfrastructure;
@@ -39,12 +42,15 @@ class BasicDeliveryTest {
         store.init();
         QuotaManager quota = new QuotaManager(props);
         SimulatedInfrastructure infra = new SimulatedInfrastructure();
+        VersionHistory history = new VersionHistory(props, store);
+        history.init();
+        TimeSource clock = new TimeSource();
         DependencyResolver resolver = new DependencyResolver();
         DriftDetector drift = new DriftDetector();
         PolicyGate gate = new PolicyGate();
         StageExecutor stageExecutor = new StageExecutor(infra, store, leases, props);
         DeliveryService svc = new DeliveryService(store, leases, quota, resolver, drift,
-                stageExecutor, gate, infra, props);
+                stageExecutor, gate, infra, props, new FreezeGate(clock), history);
         return svc;
     }
 

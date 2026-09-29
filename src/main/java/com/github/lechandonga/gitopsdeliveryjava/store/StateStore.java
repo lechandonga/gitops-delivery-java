@@ -1,6 +1,7 @@
 package com.github.lechandonga.gitopsdeliveryjava.store;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.github.lechandonga.gitopsdeliveryjava.config.DeliveryProperties;
 import com.github.lechandonga.gitopsdeliveryjava.exception.DeliveryRejectedException;
@@ -42,9 +43,13 @@ import java.util.stream.Stream;
 public class StateStore {
 
     private final ObjectMapper mapper = new ObjectMapper()
+            // 快照与事件按“宽容读取、严格写入”演进：旧数据带未知字段时忽略，绝不读挂
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(SerializationFeature.INDENT_OUTPUT);
     /** 事件 WAL 专用 mapper：每个事件必须序列化为单行（日志按行回放）。 */
-    private final ObjectMapper eventMapper = new ObjectMapper();
+    private final ObjectMapper eventMapper = new ObjectMapper()
+            // 宽容回放：旧版本事件带未知字段时忽略，保证历史可重建、读取不报错
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     private final DeliveryProperties props;
     private final com.github.lechandonga.gitopsdeliveryjava.lease.LeaseManager leaseManager;
 

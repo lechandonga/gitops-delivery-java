@@ -79,6 +79,15 @@ public class RecoveryService {
         ActualTargetState actual = store.getOrCreateActual(target);
         long now = System.currentTimeMillis();
 
+        if (flow.getStatus() == FlowStatus.PAUSED) {
+            // 人工暂停的流程：暂停期间不持有租约与额度，重启后必须仍是“暂停中”，
+            // 不接管、不清理半发布、不判超时失败；恢复入口（resume）继续可用。
+            record(target, flow, ReasonCode.FLOW_PAUSED,
+                    "重启恢复：流程为人工暂停状态，原样保留于灰度 "
+                            + actual.getCanaryPercent() + "%，等待人工恢复（已放量步不重放）");
+            return;
+        }
+
         // 接管过期租约：拿到新的 fencing token
         long newToken = leases.takeOverExpired(target,
                 props.getExecutorId() + ":recovery", props.getLeaseTtlMillis());

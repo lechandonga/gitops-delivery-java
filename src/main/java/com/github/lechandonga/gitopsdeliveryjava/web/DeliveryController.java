@@ -31,11 +31,14 @@ public class DeliveryController {
     private final DeliveryService deliveryService;
     private final ManifestSerde serde;
     private final StateStore store;
+    private final com.github.lechandonga.gitopsdeliveryjava.engine.VersionHistory versionHistory;
 
-    public DeliveryController(DeliveryService deliveryService, ManifestSerde serde, StateStore store) {
+    public DeliveryController(DeliveryService deliveryService, ManifestSerde serde, StateStore store,
+                              com.github.lechandonga.gitopsdeliveryjava.engine.VersionHistory versionHistory) {
         this.deliveryService = deliveryService;
         this.serde = serde;
         this.store = store;
+        this.versionHistory = versionHistory;
     }
 
     /** 应用期望状态清单（严格兼容校验，未知字段拒绝）。 */
@@ -72,6 +75,28 @@ public class DeliveryController {
         return deliveryService.rollback(name, actor);
     }
 
+    /** 回退到指定的历史稳定版本（该版本必须曾在本目标稳定发布过）。 */
+    @PostMapping("/targets/{name}/rollback/{version}")
+    public ReconcileOutcome rollbackTo(@PathVariable("name") String name,
+                                       @PathVariable("version") String version,
+                                       @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
+        return deliveryService.rollbackTo(name, version, actor);
+    }
+
+    /** 暂停灰度中的流程（踩刹车）。 */
+    @PostMapping("/targets/{name}/pause")
+    public ReconcileOutcome pause(@PathVariable("name") String name,
+                                  @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
+        return deliveryService.pause(name, actor);
+    }
+
+    /** 恢复暂停中的流程（从暂停的灰度步继续，已放量步不重放）。 */
+    @PostMapping("/targets/{name}/resume")
+    public ReconcileOutcome resume(@PathVariable("name") String name,
+                                   @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
+        return deliveryService.resume(name, actor);
+    }
+
     @PostMapping("/targets/{name}/cancel")
     public ReconcileOutcome cancel(@PathVariable("name") String name,
                                    @RequestHeader(value = "X-Actor", defaultValue = "anonymous") String actor) {
@@ -89,6 +114,12 @@ public class DeliveryController {
         store.loadManifest().ifPresent(m -> view.put("manifest", m));
         view.put("actual", store.allActual());
         view.put("flows", store.allFlows());
+        java.util.Map<String, Object> history = new java.util.LinkedHashMap<>();
+        store.allActual().forEach(a -> history.put(a.getName(),
+                versionHistory.history(a.getName()).stream()
+                        .map(com.github.lechandonga.gitopsdeliveryjava.model.VersionHistoryEntry::version)
+                        .toList()));
+        view.put("versionHistory", history);
         return view;
     }
 

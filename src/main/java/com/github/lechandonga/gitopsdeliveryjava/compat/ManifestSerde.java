@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.lechandonga.gitopsdeliveryjava.exception.DeliveryRejectedException;
 import com.github.lechandonga.gitopsdeliveryjava.model.CanarySpec;
 import com.github.lechandonga.gitopsdeliveryjava.model.DesiredTarget;
+import com.github.lechandonga.gitopsdeliveryjava.model.FreezeWindow;
 import com.github.lechandonga.gitopsdeliveryjava.model.Manifest;
 import com.github.lechandonga.gitopsdeliveryjava.model.ReasonCode;
 import org.springframework.stereotype.Component;
@@ -127,6 +128,65 @@ public class ManifestSerde {
                 throw new DeliveryRejectedException(ReasonCode.UNSUPPORTED_OPTION,
                         "target=" + name + " minHealthyRatio 必须在 (0,1]");
             }
+        }
+        if (t.getFreezeWindows() != null) {
+            int index = 0;
+            for (FreezeWindow window : t.getFreezeWindows()) {
+                validateFreezeWindow(name, index, window);
+                index++;
+            }
+        }
+    }
+
+    private void validateFreezeWindow(String targetName, int index, FreezeWindow w) {
+        String where = "target=" + targetName + " freezeWindows[" + index + "]";
+        if (w == null) {
+            throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                    where + " 不能为 null");
+        }
+        String type = w.getType() == null ? FreezeWindow.TYPE_DAILY : w.getType();
+        w.setType(type);
+        if (w.getStart() == null || w.getStart().isBlank()
+                || w.getEnd() == null || w.getEnd().isBlank()) {
+            throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                    where + " 必须同时声明 start 与 end");
+        }
+        switch (type) {
+            case FreezeWindow.TYPE_DAILY -> {
+                java.time.LocalTime start;
+                java.time.LocalTime end;
+                try {
+                    start = com.github.lechandonga.gitopsdeliveryjava.service.FreezeGate
+                            .parseHhMm(w.getStart());
+                    end = com.github.lechandonga.gitopsdeliveryjava.service.FreezeGate
+                            .parseHhMm(w.getEnd());
+                } catch (IllegalArgumentException e) {
+                    throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                            where + " " + e.getMessage());
+                }
+                // 起止相等表示全天冻结（合法）；跨午夜合法
+                w.setStart(String.format("%02d:%02d", start.getHour(), start.getMinute()));
+                w.setEnd(String.format("%02d:%02d", end.getHour(), end.getMinute()));
+            }
+            case FreezeWindow.TYPE_INTERVAL -> {
+                java.time.LocalDateTime start;
+                java.time.LocalDateTime end;
+                try {
+                    start = com.github.lechandonga.gitopsdeliveryjava.service.FreezeGate
+                            .parseDateTime(w.getStart());
+                    end = com.github.lechandonga.gitopsdeliveryjava.service.FreezeGate
+                            .parseDateTime(w.getEnd());
+                } catch (IllegalArgumentException e) {
+                    throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                            where + " " + e.getMessage());
+                }
+                if (!end.isAfter(start)) {
+                    throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                            where + " interval 的 end 必须晚于 start（边界 [start,end)）");
+                }
+            }
+            default -> throw new DeliveryRejectedException(ReasonCode.FREEZE_WINDOW_INVALID,
+                    where + " 不支持的 type=" + type + "，仅支持 daily/interval");
         }
     }
 }

@@ -29,6 +29,10 @@ public class SimulatedInfrastructure {
     private final Map<String, AtomicInteger> stageCounters = new ConcurrentHashMap<>();
     private final Map<String, Double> healthScripts = new ConcurrentHashMap<>();
     private final Set<String> failBuildOnce = ConcurrentHashMap.newKeySet();
+    private final Set<String> failDeployOnce = ConcurrentHashMap.newKeySet();
+    private volatile java.util.function.Consumer<String> canaryBarrier = percentKey -> { };
+    /** 运行期人工刹车信号（按 flowId）：任何入口设置后，执行器的下一个检查点立即可见。 */
+    private final Set<String> pauseSignals = ConcurrentHashMap.newKeySet();
 
     private String key(String target, String flowId, String stage) {
         return target + "|" + flowId + "|" + stage;
@@ -53,9 +57,47 @@ public class SimulatedInfrastructure {
 
     /** 部署（或调整灰度百分比）。返回当前灰度百分比。 */
     public int deployCanary(String target, String version, String flowId, int percent) {
-        executeOnce(target, flowId, "DEPLOY:" + percent);
+        String stage = "DEPLOY:" + percent;
+        if (executeOnce(target, flowId, stage)) {
+            String failKey = target + "@" + version + ":" + percent;
+            if (failDeployOnce.remove(failKey)) {
+                // 一次性失败：该 (flowId,percent) 的幂等键已消费，失败动作不得被当成已完成。
+                // 下一次重试会以新流程（新 flowId）重新真正部署该百分比。
+                executedStageKeys.remove(key(target, flowId, stage));
+                stageCounters.computeIfAbsent(target + "|" + stage, k -> new AtomicInteger())
+                        .decrementAndGet();
+                throw new RuntimeException("模拟灰度部署失败(一次性): " + failKey);
+            }
+        }
         deployments.put(target, new Deployment(version, percent));
         return percent;
+    }
+
+    /**
+     * 灰度放量步间栅栏：每次真正部署一个百分比后回调。
+     * 测试用它在“放过部分量之后、下一部分量之前”确定性地踩下暂停刹车。
+     */
+    public void setCanaryBarrier(java.util.function.Consumer<String> barrier) {
+        this.canaryBarrier = barrier == null ? p -> { } : barrier;
+    }
+
+    public void fireCanaryBarrier(String target, int percent) {
+        canaryBarrier.accept(target + ":" + percent);
+    }
+
+    /** 登记人工暂停信号（幂等），对正在执行的同一流程立即生效。 */
+    public void requestPause(String flowId) {
+        pauseSignals.add(flowId);
+    }
+
+    /** 暂停落地/恢复后清除刹车信号。 */
+    public void clearPause(String flowId) {
+        pauseSignals.remove(flowId);
+    }
+
+    /** 执行器在灰度检查点调用：该流程是否被要求暂停。 */
+    public boolean isPauseRequested(String flowId) {
+        return pauseSignals.contains(flowId);
     }
 
     /** 模拟健康判定：返回 [0,1] 的健康比例，未配置脚本则完全健康。 */
@@ -92,6 +134,11 @@ public class SimulatedInfrastructure {
         failBuildOnce.add(target + "@" + version);
     }
 
+    /** 让该目标该版本在指定灰度百分比的第一次部署抛错（仅一次），验证失败动作必须重放。 */
+    public void failDeployCanaryOnce(String target, String version, int percent) {
+        failDeployOnce.add(target + "@" + version + ":" + percent);
+    }
+
     public int executionCount(String target, String stage) {
         return stageCounters.getOrDefault(target + "|" + stage, new AtomicInteger()).get();
     }
@@ -102,5 +149,8 @@ public class SimulatedInfrastructure {
         stageCounters.clear();
         healthScripts.clear();
         failBuildOnce.clear();
+        failDeployOnce.clear();
+        canaryBarrier = p -> { };
+        pauseSignals.clear();
     }
 }
